@@ -340,6 +340,157 @@ function PulseInputNode(n) {
     }
 }
 
+// Node constructor for bbb-rotary-enc
+function RotaryEncoderNode(n) {
+    RED.nodes.createNode(this, n);
+
+    // Store local copies of the node configuration (as defined in the .html)
+    this.topic = n.topic;                       // the topic is not currently used
+    this.pin = [n.IPin, n.QPin];                // The Beaglebone Black pin identifying strings
+    this.step = n.step;                         // Amount to change for each step of the encoder
+    // Ensure that maxValue >= minValue if limits are enabled
+    this.enableLimits = n.enableLimits;         
+    if (this.enableLimits) {
+        this.limits = [Math.min(Number(n.minValue), Number(n.maxValue)), Math.max(Number(n.minValue), Number(n.maxValue))];
+    } else {
+        this.limits = [-Infinity, Infinity];
+    }
+    // Esure that the start value is within the limits
+    this.startupValue = Math.min(Math.max(n.startupValue, this.limits[0]), this.limits[1]);
+
+    // Working variables
+    this.interruptAttached = [false, false];    // Flag: should we detach interrupt when we are closed?
+    this.currentState = [0, 0];                 // The pin input state "1" or "0"
+    this.debounceTime = 1;                      // A trade-off between reliability and maximum knob rotation rate
+    this.debounceTimer = [null, null];          // Non-null while waiting for the debounce time to elapse
+    this.currentValue = 0;
+    
+    // Define 'node' to allow us to access 'this' from within callbacks
+    var node = this;
+    
+    // Called by the change-of-state interrupt handler for the pin. Wait for
+    // the debounce time (ignoring any calls during this period); read the new pin
+    // value, work out if the change can be reliably decoded, and use the old &
+    // new pin values to change the current value in the appropriate direction
+    var debounce = function (pinIndex) {
+            // If our timer is not null we are already debouncing: just return
+            // Otherwise set our debounce timer
+            if (node.debounceTimer[pinIndex] === null) {
+                node.debounceTimer[pinIndex] = setTimeout(function () {
+                        // Timer elapsed: read the pin
+                        bonescript.digitalRead(node.pin[pinIndex], function (x) {
+                                node.debounceTimer[pinIndex] = null;
+                                // If the other pin's debounce timer is non-null, the
+                                // encoder is rotating too fast to be decoded
+                                if (node.debounceTimer[0] !== null || node.debounceTimer[1] !== null) {
+                                    return;
+                                }
+                                // Otherwise work out the direction of change using a state machine
+                                if (x.value !== undefined && node.currentState[pinIndex] !== Number(x.value)) {
+                                    var previousState = node.currentState[0] + 2*node.currentState[1];
+                                    node.currentState[pinIndex] = Number(x.value);
+                                    var nextState = node.currentState[0] + 2*node.currentState[1];
+                                    var change = 0;
+                                    switch (previousState) {
+                                    case 0:
+                                        if (nextState === 1) {
+                                            change = +1;
+                                        } else if (nextState === 2) {
+                                            change = -1;
+                                        }
+                                        break;
+                                    case 1:
+                                        if (nextState === 0) {
+                                            change = -1;
+                                        } else if (nextState === 3) {
+                                            change = +1;
+                                        }
+                                        break
+                                    case 2:
+                                        if (nextState === 0) {
+                                            change = +1;
+                                        } else if (nextState === 3) {
+                                            change = -1;
+                                        }
+                                        break;
+                                    case 3:
+                                        if (nextState === 1) {
+                                            change = -1;
+                                        } else if (nextState === 2) {
+                                            change = +1;
+                                        }
+                                        break;
+                                    }
+                                    if (change !== 0) {
+                                        changeCurrentValue(node.currentValue + change*node.step);
+                                    }
+                                }
+                            });
+                    }, node.debounceTime);
+            }
+        };
+    
+    // Apply the limits to the new value, and if it is different from the current value,
+    // update the node and send a message
+    var changeCurrentValue = function (newValue) {
+            newValue = Math.min(Math.max(newValue, node.limits[0]), node.limits[1]);
+            if (newValue !== node.currentValue) {
+                node.currentValue = newValue;
+                node.send({ topic:node.topic,payload: node.currentValue});
+            }
+        };
+    
+    // Interrupt handlers for each pin: calls the debounce function passing it the pin idex
+    var interruptCallback = [
+            function (x) { if (x.value !== undefined) debounce(0); },
+            function (x) { if (x.value !== undefined) debounce(1); }
+        ];
+    
+    // This function is called when we receive an input message. If the topic contains
+    // 'load' (case insensitive) set the current value to the numeric value of the
+    // payload, if possible. Otherwise clear it
+    var inputCallback = function (msg) {
+            if (String(msg.topic).search(/load/i) < 0 || isFinite(msg.payload) == false) {
+                changeCurrentValue(0);
+            } else {
+                changeCurrentValue(Number(msg.payload));
+            }
+        };
+
+    var pinList = ["P8_7", "P8_8", "P8_9", "P8_10", "P8_11", "P8_12", "P8_13", "P8_14", "P8_15",
+         "P8_16", "P8_17", "P8_18", "P8_19", "P8_26", "P9_11", "P9_12", "P9_13", "P9_14",
+         "P9_15", "P9_16", "P9_17", "P9_18", "P9_21", "P9_22", "P9_23", "P9_24", "P9_26",
+         "P9_27", "P9_30", "P9_41", "P9_42"];
+    var pinIndex = [pinList.indexOf(node.pin[0]), pinList.indexOf(node.pin[1])];
+    // If we have two valid pins, set them as inputs and read the initial state
+    if (pinIndex[0] >= 0 && pinIndex[1] >= 0 && pinIndex[0] !== pinIndex[1]) {
+        // Don't set up interrupts & intervals until after the close event handler has been installed
+        var setupPin = function(pinNumber) {
+                bonescript.detachInterrupt(node.pin[pinNumber]);
+                bonescript.pinMode(node.pin[pinNumber], bonescript.INPUT);
+                bonescript.digitalRead(node.pin[pinNumber], function (x) {
+                        node.currentState[pinNumber] = Number(x.value);
+                        if (bonescript.attachInterrupt(node.pin[pinNumber], true, bonescript.CHANGE, interruptCallback[pinNumber])) {
+                            node.interruptAttached[pinNumber] = true;
+                        } else {
+                            node.error("Failed to attach interrupt");
+                        }
+                    });
+            };
+        process.nextTick(function () {
+                for (var pinNumber = 0; pinNumber < 2; pinNumber++) {
+                    setupPin(pinNumber);
+                }
+                node.on("input", inputCallback);
+                if (node.startupValue !== 0) {
+                    setTimeout(function () { node.emit("input", { topic:"load", payload:node.startupValue }); }, 50);
+                }
+            });
+    } else {
+        node.error("Unconfigured input pin");
+    }
+}
+
 // Node constructor for bbb-discrete-out
 function DiscreteOutputNode(n) {
     RED.nodes.createNode(this, n);
@@ -474,6 +625,7 @@ function PulseOutputNode(n) {
 RED.nodes.registerType("bbb-analogue-in", AnalogueInputNode);
 RED.nodes.registerType("bbb-discrete-in", DiscreteInputNode);
 RED.nodes.registerType("bbb-pulse-in", PulseInputNode);
+RED.nodes.registerType("bbb-rotary-enc", RotaryEncoderNode);
 RED.nodes.registerType("bbb-discrete-out", DiscreteOutputNode);
 RED.nodes.registerType("bbb-pulse-out", PulseOutputNode);
 
@@ -497,6 +649,17 @@ PulseInputNode.prototype.close = function () {
     }
     if (this.intervalId !== null) {
         clearInterval(this.intervalId);
+    }
+};
+
+RotaryEncoderNode.prototype.close = function() {
+    for (var j = 0; j < 2; j++) {
+        if (this.interruptAttached[j]) {
+            bonescript.detachInterrupt(this.pin[j]);
+        }
+        if (this.debounceTimer[j] !== null) {
+            clearTimeout(this.debounceTimer[j]);
+        }
     }
 };
 

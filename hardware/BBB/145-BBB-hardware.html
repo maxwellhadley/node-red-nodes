@@ -413,6 +413,164 @@ any other input message will reset it to zero.
     });
 </script>
 
+<!-- Edit dialog for bbb-rotary-enc -->
+<script type="text/x-red" data-template-name="bbb-rotary-enc">
+    <div class="form-row">
+       <label for="node-input-IPin"><i class="icon-asterisk"></i>I Input pin</label>
+       <select type="text" id="node-input-IPin" style="width: 200px;">
+           <option value="">select pin</option>
+           <option value="P8_7">GPIO2_2 (P8 pin 7)</option>
+           <option value="P8_8">GPIO2_3 (P8 pin 8)</option>
+           <option value="P8_9">GPIO2_5 (P8 pin 9)</option>
+           <option value="P8_10">GPIO2_4 (P8 pin 10)</option>
+           <option value="P8_11">GPIO1_13 (P8 pin 11)</option>
+           <option value="P8_12">GPIO1_12 (P8 pin 12)</option>
+           <option value="P8_13">GPIO0_23 (P8 pin 13)</option>
+           <option value="P8_14">GPIO0_26 (P8 pin 14)</option>
+           <option value="P8_15">GPIO1_15 (P8 pin 15)</option>
+           <option value="P8_16">GPIO1_14 (P8 pin 16)</option>
+           <option value="P8_17">GPIO0_27 (P8 pin 17)</option>
+           <option value="P8_18">GPIO2_1 (P8 pin 18)</option>
+           <option value="P8_19">GPIO0_22 (P8 pin 19)</option>
+           <option value="P8_26">GPIO1_29 (P8 pin 26)</option>
+           <option value="P9_11">GPIO0_30 (P9 pin 11)</option>
+           <option value="P9_12">GPIO1_28 (P9 pin 12)</option>
+           <option value="P9_13">GPIO0_31 (P9 pin 13)</option>
+           <option value="P9_14">GPIO1_18 (P9 pin 14)</option>
+           <option value="P9_15">GPIO1_16 (P9 pin 15)</option>
+           <option value="P9_16">GPIO1_19 (P9 pin 16)</option>
+           <option value="P9_17">GPIO0_5 (P9 pin 17)</option>
+           <option value="P9_18">GPIO0_4 (P9 pin 18)</option>
+           <option value="P9_21">GPIO0_3 (P9 pin 21)</option>
+           <option value="P9_22">GPIO0_2 (P9 pin 22)</option>
+           <option value="P9_23">GPIO1_17 (P9 pin 23)</option>
+           <option value="P9_24">GPIO0_15 (P9 pin 24)</option>
+           <option value="P9_26">GPIO0_14 (P9 pin 26)</option>
+           <option value="P9_27">GPIO3_19 (P9 pin 27)</option>
+           <option value="P9_30">GPIO3_16 (P9 pin 30)</option>
+           <option value="P9_41">GPIO0_20 (P9 pin 41)</option>
+           <option value="P9_42">GPIO0_7 (P9 pin 42)</option>
+        </select>
+    </div>
+    <div class="form-row">
+       <label for="node-input-QPin"><i class="icon-asterisk"></i>Q Input pin</label>
+       <select type="text" id="node-input-QPin" style="width: 200px;">
+           <option value="">select pin</option>
+           <option value="P8_7">GPIO2_2 (P8 pin 7)</option>
+           <option value="P8_8">GPIO2_3 (P8 pin 8)</option>
+           <option value="P8_9">GPIO2_5 (P8 pin 9)</option>
+           <option value="P8_10">GPIO2_4 (P8 pin 10)</option>
+           <option value="P8_11">GPIO1_13 (P8 pin 11)</option>
+           <option value="P8_12">GPIO1_12 (P8 pin 12)</option>
+           <option value="P8_13">GPIO0_23 (P8 pin 13)</option>
+           <option value="P8_14">GPIO0_26 (P8 pin 14)</option>
+           <option value="P8_15">GPIO1_15 (P8 pin 15)</option>
+           <option value="P8_16">GPIO1_14 (P8 pin 16)</option>
+           <option value="P8_17">GPIO0_27 (P8 pin 17)</option>
+           <option value="P8_18">GPIO2_1 (P8 pin 18)</option>
+           <option value="P8_19">GPIO0_22 (P8 pin 19)</option>
+           <option value="P8_26">GPIO1_29 (P8 pin 26)</option>
+           <option value="P9_11">GPIO0_30 (P9 pin 11)</option>
+           <option value="P9_12">GPIO1_28 (P9 pin 12)</option>
+           <option value="P9_13">GPIO0_31 (P9 pin 13)</option>
+           <option value="P9_14">GPIO1_18 (P9 pin 14)</option>
+           <option value="P9_15">GPIO1_16 (P9 pin 15)</option>
+           <option value="P9_16">GPIO1_19 (P9 pin 16)</option>
+           <option value="P9_17">GPIO0_5 (P9 pin 17)</option>
+           <option value="P9_18">GPIO0_4 (P9 pin 18)</option>
+           <option value="P9_21">GPIO0_3 (P9 pin 21)</option>
+           <option value="P9_22">GPIO0_2 (P9 pin 22)</option>
+           <option value="P9_23">GPIO1_17 (P9 pin 23)</option>
+           <option value="P9_24">GPIO0_15 (P9 pin 24)</option>
+           <option value="P9_26">GPIO0_14 (P9 pin 26)</option>
+           <option value="P9_27">GPIO3_19 (P9 pin 27)</option>
+           <option value="P9_30">GPIO3_16 (P9 pin 30)</option>
+           <option value="P9_41">GPIO0_20 (P9 pin 41)</option>
+           <option value="P9_42">GPIO0_7 (P9 pin 42)</option>
+        </select>
+    </div>
+    <div class="form-row">
+        <label for="node-input-step">Step size</label>
+        <input type="text" id="node-input-step" style="width: 170px;">
+    </div>
+    <div class="form-row">
+        <label for="node-input-startupValue">Startup value</label>
+        <input type="text" id="node-input-startupValue" style="width: 170px;">
+    </div>
+    <div class="form-row">
+        <label for="node-input-enableLimits">Limit range</label>
+        <input type="checkbox" id="node-input-enableLimits" value="enableLimits"
+                        style="display:inline-block; width:auto; vertical-align:top;">
+    </div>
+    <div class="hidden" id="limits-edit">
+        <div class="form-row">
+            <label for="node-input-minValue">&nbsp;&nbsp;&nbsp;Minimum</label>
+            <input type="text" id="node-input-minValue" style="width: 170px">
+        </div>
+        <div class="form-row">
+            <label for="node-input-maxValue">&nbsp;&nbsp;&nbsp;Maximum</label>
+            <input type="text" id="node-input-maxValue" style="width: 170px">
+        </div>
+    </div>
+    <div class="form-row">
+        <label for="node-input-topic"><i class="icon-tasks"></i> Topic</label>
+        <input type="text" id="node-input-topic" placeholder="Topic">
+    </div>
+    <div class="form-row">
+        <label for="node-input-name"><i class="icon-tag"></i> Name</label>
+        <input type="text" id="node-input-name" placeholder="Name">
+    </div>
+    <script>
+    {
+        $("#node-input-enableLimits").change(function () {
+                if ($("#node-input-enableLimits").is(":checked")) {
+                    $("#limits-edit").show();
+                } else {
+                    $("#limits-edit").hide();
+                }
+            });
+    }
+    </script>
+</script>
+
+<!-- Help text for bbb-rotary-enc -->
+<script type="text/x-red" data-help-name="bbb-rotary-enc">
+<p>
+Rotary-encoder input for the Beaglebone Black. Outputs the current count value
+each time the encoder rotates.
+</p>
+<p>
+</p>
+</script>
+
+<!-- Register bbb-rotary-enc node -->
+<script type="text/javascript">
+    RED.nodes.registerType('bbb-rotary-enc', {
+        category: 'advanced-input', // the palette category
+        color:"#de7224",
+        defaults: {                 // defines the editable properties of the node
+            IPin: { value:"", required:true },
+            QPin: { value:"", required:true },
+            step: { value:"1", required:true, validate:RED.validators.number() },
+            startupValue: { value:"0", validate:RED.validators.number() },
+            enableLimits: { value:false },
+            minValue: { value:"0", validate:RED.validators.number() },
+            maxValue: { value:"11", validate:RED.validators.number() },
+            topic: { value:"" },
+            name: { value:"" }
+        },
+        inputs:1,                   // set the number of inputs - only 0 or 1
+        outputs:1,                  // set the number of outputs - 0 to n
+        icon: "BBB.png",            // set the icon (held in BBB/icons)
+        label: function() {         // sets the default label contents
+            return this.name || "bbb-rotary-enc: " + this.IPin + "/" + this.QPin;
+        },
+        labelStyle: function() {    // sets the class to apply to the label
+            return this.name ? "node_label_italic" : "";
+        }
+    });
+</script>
+
 <!-- Edit dialog for bbb-discrete-out -->
 <script type="text/x-red" data-template-name="bbb-discrete-out">
    <div class="form-row">
