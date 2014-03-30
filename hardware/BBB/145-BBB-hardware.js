@@ -24,6 +24,15 @@ try {
     require("util").log("[145-BBB-hardware] Error: cannot find module 'bonescript'");
 }
 
+var analoguePins = ["P9_39", "P9_40", "P9_37", "P9_38", "P9_33", "P9_36", "P9_35"];
+
+var gpioPins = ["P8_7", "P8_8", "P8_9", "P8_10", "P8_11", "P8_12", "P8_13", "P8_14", "P8_15",
+     "P8_16", "P8_17", "P8_18", "P8_19", "P8_26", "P9_11", "P9_12", "P9_13", "P9_14",
+     "P9_15", "P9_16", "P9_17", "P9_18", "P9_21", "P9_22", "P9_23", "P9_24", "P9_26",
+     "P9_27", "P9_30", "P9_41", "P9_42"];
+
+var leds = ["USR0", "USR1", "USR2", "USR3"];
+     
 // Node constructor for bbb-analogue-in
 function AnalogueInputNode(n) {
     // Create a RED node
@@ -69,7 +78,7 @@ function AnalogueInputNode(n) {
         };
 
     // If we have a valid pin, set the input event handler to Bonescript's analogRead
-    if (["P9_39", "P9_40", "P9_37", "P9_38", "P9_33", "P9_36", "P9_35"].indexOf(node.pin) >= 0) {
+    if (analoguePins.indexOf(node.pin) >= 0) {
         node.on("input", function (msg) {
                 sum = 0;
                 count = node.averages;
@@ -215,10 +224,7 @@ function DiscreteInputNode(n) {
         };
 
     // If we have a valid pin, set it as an input and read the (digital) state
-    if (["P8_7", "P8_8", "P8_9", "P8_10", "P8_11", "P8_12", "P8_13", "P8_14", "P8_15",
-         "P8_16", "P8_17", "P8_18", "P8_19", "P8_26", "P9_11", "P9_12", "P9_13", "P9_14",
-         "P9_15", "P9_16", "P9_17", "P9_18", "P9_21", "P9_22", "P9_23", "P9_24", "P9_26",
-         "P9_27", "P9_30", "P9_41", "P9_42"].indexOf(node.pin) >= 0) {
+    if (gpioPins.indexOf(node.pin) >= 0) {
         // Don't set up interrupts & intervals until after the close event handler has been installed
         bonescript.detachInterrupt(node.pin);
         process.nextTick(function () {
@@ -306,10 +312,7 @@ function PulseInputNode(n) {
         };
 
     // If we have a valid pin, set it as an input and read the (digital) state
-    if (["P8_7", "P8_8", "P8_9", "P8_10", "P8_11", "P8_12", "P8_13", "P8_14", "P8_15",
-         "P8_16", "P8_17", "P8_18", "P8_19", "P8_26", "P9_11", "P9_12", "P9_13", "P9_14",
-         "P9_15", "P9_16", "P9_17", "P9_18", "P9_21", "P9_22", "P9_23", "P9_24", "P9_26",
-         "P9_27", "P9_30", "P9_41", "P9_42"].indexOf(node.pin) >= 0) {
+    if (gpioPins.indexOf(node.pin) >= 0) {
         // Don't set up interrupts & intervals until after the close event handler has been installed
         bonescript.detachInterrupt(node.pin);
         process.nextTick(function () {
@@ -361,90 +364,99 @@ function RotaryEncoderNode(n) {
     // Working variables
     this.interruptAttached = [false, false];    // Flag: should we detach interrupt when we are closed?
     this.currentState = [0, 0];                 // The pin input state "1" or "0"
-    this.debounceTime = 1;                      // A trade-off between reliability and maximum knob rotation rate
+    this.debounceTime = 8;                      // A trade-off between reliability and maximum knob rotation rate
     this.debounceTimer = [null, null];          // Non-null while waiting for the debounce time to elapse
     this.currentValue = 0;
     
     // Define 'node' to allow us to access 'this' from within callbacks
     var node = this;
     
+    // Interrupt handlers for each pin: calls the debounce function passing it the
+    // indexes of 'this' pin and the 'other' pin
+    var interruptCallback = [
+            function (x) { if (x.value !== undefined) debounce(0, 1); },
+            function (x) { if (x.value !== undefined) debounce(1, 0); }
+        ];
+    
     // Called by the change-of-state interrupt handler for the pin. Wait for
     // the debounce time (ignoring any calls during this period); read the new pin
     // value, work out if the change can be reliably decoded, and use the old &
     // new pin values to change the current value in the appropriate direction
-    var debounce = function (pinIndex) {
+    var debounce = function (pinIndex, otherPinIndex) {
             // If our timer is not null we are already debouncing: just return
             // Otherwise set our debounce timer
             if (node.debounceTimer[pinIndex] === null) {
                 node.debounceTimer[pinIndex] = setTimeout(function () {
                         // Timer elapsed: read the pin
-                        bonescript.digitalRead(node.pin[pinIndex], function (x) {
-                                node.debounceTimer[pinIndex] = null;
-                                // If the other pin's debounce timer is non-null, the
-                                // encoder is rotating too fast to be decoded
-                                if (node.debounceTimer[0] !== null || node.debounceTimer[1] !== null) {
-                                    return;
-                                }
-                                // Otherwise work out the direction of change using a state machine
-                                if (x.value !== undefined && node.currentState[pinIndex] !== Number(x.value)) {
-                                    var previousState = node.currentState[0] + 2*node.currentState[1];
-                                    node.currentState[pinIndex] = Number(x.value);
-                                    var nextState = node.currentState[0] + 2*node.currentState[1];
-                                    var change = 0;
-                                    switch (previousState) {
-                                    case 0:
-                                        if (nextState === 1) {
-                                            change = +1;
-                                        } else if (nextState === 2) {
-                                            change = -1;
-                                        }
-                                        break;
-                                    case 1:
-                                        if (nextState === 0) {
-                                            change = -1;
-                                        } else if (nextState === 3) {
-                                            change = +1;
-                                        }
-                                        break
-                                    case 2:
-                                        if (nextState === 0) {
-                                            change = +1;
-                                        } else if (nextState === 3) {
-                                            change = -1;
-                                        }
-                                        break;
-                                    case 3:
-                                        if (nextState === 1) {
-                                            change = -1;
-                                        } else if (nextState === 2) {
-                                            change = +1;
-                                        }
-                                        break;
-                                    }
-                                    if (change !== 0) {
-                                        changeCurrentValue(node.currentValue + change*node.step);
-                                    }
-                                }
-                            });
+                        readPin(pinIndex);
                     }, node.debounceTime);
+            }
+            // If the other pin timer is not null, the knob is turning fast! End the
+            // other pin's debounce early and read it straight away
+            if (node.debounceTimer[otherPinIndex] !== null) {
+                clearTimeout(node.debounceTimer[otherPinIndex]);            
+                readPin(otherPinIndex);
             }
         };
     
+    // Read the state of the pin supplied as parameter, and update the currentValue using
+    // a state machine. Called when the debounce timer expires, or on occasion earlier, if
+    // the other pin raises an interrupt.
+    var readPin = function (pinIndex) {
+            bonescript.digitalRead(node.pin[pinIndex], function (x) {
+                node.debounceTimer[pinIndex] = null;
+                // Work out the direction of change using a state machine
+                if (x.value !== undefined && node.currentState[pinIndex] !== Number(x.value)) {
+                    var previousState = node.currentState[0] + 2*node.currentState[1];
+                    node.currentState[pinIndex] = Number(x.value);
+                    var nextState = node.currentState[0] + 2*node.currentState[1];
+                    var change = 0;
+                    switch (previousState) {
+                    case 0:
+                        if (nextState === 1) {
+                            change = +1;
+                        } else if (nextState === 2) {
+                            change = -1;
+                        }
+                        break;
+                    case 1:
+                        if (nextState === 0) {
+                            change = -1;
+                        } else if (nextState === 3) {
+                            change = +1;
+                        }
+                        break
+                    case 2:
+                        if (nextState === 0) {
+                            change = +1;
+                        } else if (nextState === 3) {
+                            change = -1;
+                        }
+                        break;
+                    case 3:
+                        if (nextState === 1) {
+                            change = -1;
+                        } else if (nextState === 2) {
+                            change = +1;
+                        }
+                        break;
+                    }
+                    if (change !== 0) {
+                        changeCurrentValue(node.currentValue + change*node.step);
+                    }
+                }
+            });
+        };
+        
     // Apply the limits to the new value, and if it is different from the current value,
     // update the node and send a message
     var changeCurrentValue = function (newValue) {
             newValue = Math.min(Math.max(newValue, node.limits[0]), node.limits[1]);
             if (newValue !== node.currentValue) {
                 node.currentValue = newValue;
-                node.send({ topic:node.topic,payload: node.currentValue});
+                node.send({ topic:node.topic, payload: node.currentValue});
             }
         };
-    
-    // Interrupt handlers for each pin: calls the debounce function passing it the pin idex
-    var interruptCallback = [
-            function (x) { if (x.value !== undefined) debounce(0); },
-            function (x) { if (x.value !== undefined) debounce(1); }
-        ];
     
     // This function is called when we receive an input message. If the topic contains
     // 'load' (case insensitive) set the current value to the numeric value of the
@@ -457,11 +469,7 @@ function RotaryEncoderNode(n) {
             }
         };
 
-    var pinList = ["P8_7", "P8_8", "P8_9", "P8_10", "P8_11", "P8_12", "P8_13", "P8_14", "P8_15",
-         "P8_16", "P8_17", "P8_18", "P8_19", "P8_26", "P9_11", "P9_12", "P9_13", "P9_14",
-         "P9_15", "P9_16", "P9_17", "P9_18", "P9_21", "P9_22", "P9_23", "P9_24", "P9_26",
-         "P9_27", "P9_30", "P9_41", "P9_42"];
-    var pinIndex = [pinList.indexOf(node.pin[0]), pinList.indexOf(node.pin[1])];
+    var pinIndex = [gpioPins.indexOf(node.pin[0]), gpioPins.indexOf(node.pin[1])];
     // If we have two valid pins, set them as inputs and read the initial state
     if (pinIndex[0] >= 0 && pinIndex[1] >= 0 && pinIndex[0] !== pinIndex[1]) {
         // Don't set up interrupts & intervals until after the close event handler has been installed
@@ -531,10 +539,7 @@ function DiscreteOutputNode(n) {
         };
     
     // If we have a valid pin, set it as an output and set the default state
-    if (["P8_7", "P8_8", "P8_9", "P8_10", "P8_11", "P8_12", "P8_13", "P8_14", "P8_15",
-         "P8_16", "P8_17", "P8_18", "P8_19", "P8_26", "P9_11", "P9_12", "P9_13", "P9_14",
-         "P9_15", "P9_16", "P9_17", "P9_18", "P9_21", "P9_22", "P9_23", "P9_24", "P9_26",
-         "P9_27", "P9_30", "P9_41", "P9_42", "USR0", "USR1", "USR2", "USR3"].indexOf(node.pin) >= 0) {
+    if (gpioPins.indexOf(node.pin) >= 0 || leds.indexOf(node.pin) >= 0) {
         // Don't set up interrupts & intervals until after the close event handler has been installed
         bonescript.detachInterrupt(node.pin);
         process.nextTick(function () {
@@ -604,10 +609,7 @@ function PulseOutputNode(n) {
         };
     
     // If we have a valid pin, set it as an output and set the default state
-    if (["P8_7", "P8_8", "P8_9", "P8_10", "P8_11", "P8_12", "P8_13", "P8_14", "P8_15",
-         "P8_16", "P8_17", "P8_18", "P8_19", "P8_26", "P9_11", "P9_12", "P9_13", "P9_14",
-         "P9_15", "P9_16", "P9_17", "P9_18", "P9_21", "P9_22", "P9_23", "P9_24", "P9_26",
-         "P9_27", "P9_30", "P9_41", "P9_42", "USR0", "USR1", "USR2", "USR3"].indexOf(node.pin) >= 0) {
+    if (gpioPins.indexOf(node.pin) >= 0 || leds.indexOf(node.pin) >= 0) {
         // Don't set up interrupts & intervals until after the close event handler has been installed
         bonescript.detachInterrupt(node.pin);
         process.nextTick(function () {

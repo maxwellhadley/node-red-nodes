@@ -536,10 +536,30 @@ any other input message will reset it to zero.
 <!-- Help text for bbb-rotary-enc -->
 <script type="text/x-red" data-help-name="bbb-rotary-enc">
 <p>
-Rotary-encoder input for the Beaglebone Black. Outputs the current count value
-each time the encoder rotates.
+Rotary-encoder input for the Beaglebone Black. Outputs the current value each
+time it is changed by moving the encoder one position.
+Useful for a digital 'control knob'.
 </p>
 <p>
+The Step size is the change in the output value produced by moving clockwise one position. The
+output value range may be limited to lie between Minimum and Maximum values. Once
+the value reaches a limit, further movement of the encoder in the same direction will
+not generate any output messages.
+</p>
+<p>
+The output value at Startup must be specified. An input message with a topic including the
+text 'load' and a numeric payload will set the current value to the payload value; any
+other message sets it to zero. Limits, if enabled, are applied to these values. If
+the output value changes as a result, an output message is generated.
+</p>
+<p>
+The encoder connects to two GPIO pins 'I' and 'Q' - if the value changes in the 'wrong'
+direction, either exchange these pins or change the sign of the Step.
+</p>
+<p>
+<em>CAUTION:</em> rapid rotation of the encoder can generate thousands of interrupts
+per second, which the Beaglebone cannot handle. This may cause erratic and/or reversed
+changes in the output value. With a normal-sized control knob this is not usually a problem.
 </p>
 </script>
 
@@ -551,8 +571,8 @@ each time the encoder rotates.
         defaults: {                 // defines the editable properties of the node
             IPin: { value:"", required:true },
             QPin: { value:"", required:true },
-            step: { value:"1", required:true, validate:RED.validators.number() },
-            startupValue: { value:"0", validate:RED.validators.number() },
+            step: { value:"0.5", required:true, validate:RED.validators.number() },
+            startupValue: { value:"0", required:true, validate:RED.validators.number() },
             enableLimits: { value:false },
             minValue: { value:"0", validate:RED.validators.number() },
             maxValue: { value:"11", validate:RED.validators.number() },
