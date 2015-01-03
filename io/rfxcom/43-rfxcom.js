@@ -14,12 +14,8 @@
   limitations under the License.
 */
 
-//var RED = require(process.env.NODE_RED_HOME + "/red/red"),
-//    rfxcom = require("rfxcom");
-
 module.exports = function (RED) {
     "use strict";
-
     var rfxcom = require("rfxcom");
 
 // The config node holding the (serial) port device path for one or more rfxcom family nodes
@@ -33,46 +29,88 @@ module.exports = function (RED) {
 
 // An object maintaining a pool of config nodes
     var rfxcomPool = function () {
-        var pool = {};
+        var pool = {}, intervalTimer = null;
+
+        var connectTo = function (rfxtrx, node) {
+            try {
+                //noinspection JSUnusedLocalSymbols
+                rfxtrx.initialising = true;
+                rfxtrx.initialise(function (error, response, sequenceNumber) {
+                    node.log("connected: Serial port " + rfxtrx.device);
+                    if (intervalTimer !== null) {
+                        clearInterval(intervalTimer);
+                        intervalTimer = null;
+                    }
+                    rfxtrx.connected = true;
+                });
+            }
+            catch (exception) {
+                if (intervalTimer === null) {
+                    node.log("disconnected: " + exception.message);
+                    intervalTimer = setInterval(function () {
+                        connectTo(rfxtrx, node)
+                    }, rfxtrx.initialiseWaitTime);
+                }
+            }
+        };
+
         return {
-            get:     function (port, options) {
+            get: function (node, port, options) {
                 // Returns the RfxCom object associated with port, or creates a new RfxCom object,
                 // associates it with the port, and returns it. 'port' is the device file path to
                 // the pseudo-serialport, e.g. '/dev/tty.usb-123456'
-                var id = port; //TODO - I don't think we need this?
-                if (!pool[id]) {
-                    try {
-                        var rfxtrx = new rfxcom.RfxCom(port, options || {});
-                        rfxtrx.ready = false;
-                        //noinspection JSUnusedLocalSymbols
-                        rfxtrx.initialise(function (error, response, sequenceNumber) {
-                            rfxtrx.ready = true;
-                            rfxtrx.transmitters = {};
-                            console.log("Device initialised");
+                var rfxtrx;
+                if (!pool[port]) {
+                    rfxtrx = new rfxcom.RfxCom(port, options || {});
+                    rfxtrx.connected = false;
+                    rfxtrx.initialising = false;
+                    rfxtrx.transmitters = {};
+                    rfxtrx.on("status", function (status) {
+                        rfxtrx.receiverType = status.receiverType;
+                        rfxtrx.firmwareVersion = status.firmwareVersion;
+                        rfxtrx.enabledProtocols = status.enabledProtocols;
+                        rfxtrx.initialising = false;
+                        pool[port].references.forEach(function (node) {
+                            node.status({
+                                fill:  "green",
+                                shape: "dot",
+                                text:  "OK (firmware " + status.firmwareVersion + ")"
+                            });
                         });
-                        rfxtrx.on("status", function (status) {
-                            rfxtrx.receiverType = status.receiverType;
-                            rfxtrx.firmwareVersion = status.firmwareVersion;
-                            rfxtrx.enabledProtocols = status.enabledProtocols;
+                    });
+                    rfxtrx.on("connecting", function () {
+                        pool[port].references.forEach(function (node) {
+                            node.status({fill:"yellow",shape:"dot",text:"connecting..."});
                         });
-                        pool[id] = {rfxtrx: rfxtrx, refcount: 0};
-                    }
-                    catch (exception) {
-                        console.log("[43-rfxcom.js] " + exception.message);
-                        //    return null;
-                        pool[id] = {rfxtrx: null, refcount: 0};
-                    }
+                    });
+                    rfxtrx.on("disconnect", function (msg) {
+                        rfxtrx.connected = false;
+                        rfxtrx.initialising = false;
+                        pool[port].references.forEach(function (node) {
+                            node.status({fill:"red",shape:"ring",text:"disconnected"});
+                        });
+                        connectTo(rfxtrx, node);
+                    });
+                    pool[port] = {rfxtrx: rfxtrx, references: []};
+                } else {
+                    rfxtrx = pool[port].rfxtrx;
+                }
+                if (rfxtrx.connected === false && rfxtrx.initialising === false) {
+                    connectTo(rfxtrx, node);
                 }
                 // Maintain a reference count for each RfxCom object
-                pool[id].refcount = pool[id].refcount + 1;
-                return pool[id].rfxtrx;
+                pool[port].references.push(node);
+                return pool[port].rfxtrx;
             },
-            release: function (port) {
+            release: function (node, port) {
                 // Decrement the reference count, and delete the RfxCom object if the count goes to 0
                 if (pool[port]) {
-                    pool[port].refcount = pool[port].refcount - 1;
-                    if (pool[port].refcount <= 0) {
-                        delete pool[port];
+                    pool[port].references.splice(pool[port].references.indexOf(node), 1);
+                    if (pool[port].references.length <= 0) {
+                        pool[port].rfxtrx.close();
+                        pool[port].rfxtrx.removeAllListeners("status");
+                        pool[port].rfxtrx.removeAllListeners("disconnect");
+                        pool[port] = false;
                     }
                 }
             }
@@ -82,7 +120,7 @@ module.exports = function (RED) {
     var releasePort = function (node) {
         // Decrement the reference count on the node port
         if (node.rfxtrxPort) {
-            rfxcomPool.release(node.rfxtrxPort.port);
+            rfxcomPool.release(node, node.rfxtrxPort.port);
         }
     };
 
@@ -213,8 +251,12 @@ module.exports = function (RED) {
 
         var node = this;
         if (node.rfxtrxPort) {
-            node.rfxtrx = rfxcomPool.get(node.rfxtrxPort.port, {debug: true});
+            node.rfxtrx = rfxcomPool.get(node, node.rfxtrxPort.port, {debug: true});
             if (node.rfxtrx !== null) {
+                node.status({fill:"red",shape:"ring",text:"disconnected"})
+                node.on("close", function () {
+                    releasePort(node);
+                });
                 node.rfxtrx.on("lighting1", function (evt) {
                     var msg = {};
                     msg.topic = evt.subtype + "/" + evt.housecode;
@@ -487,8 +529,12 @@ module.exports = function (RED) {
         };
 
         if (node.rfxtrxPort) {
-            node.rfxtrx = rfxcomPool.get(node.rfxtrxPort.port, {debug: true});
+            node.rfxtrx = rfxcomPool.get(node, node.rfxtrxPort.port, {debug: true});
             if (node.rfxtrx !== null) {
+                node.status({fill:"red",shape:"ring",text:"disconnected"})
+                node.on("close", function () {
+                    releasePort(node);
+                });
                 for (i = 1; i < rfxcom.temperatureRain1.length; i++) {
                     node.rfxtrx.on("temprain" + i, weatherEventHandler);
                 }
@@ -594,8 +640,12 @@ module.exports = function (RED) {
         };
 
         if (node.rfxtrxPort) {
-            node.rfxtrx = rfxcomPool.get(node.rfxtrxPort.port, {debug: true});
+            node.rfxtrx = rfxcomPool.get(node, node.rfxtrxPort.port, {debug: true});
             if (node.rfxtrx !== null) {
+                node.status({fill:"red",shape:"ring",text:"disconnected"})
+                node.on("close", function () {
+                    releasePort(node);
+                });
                 node.rfxtrx.on("elec", meterEventHandler)
             }
         } else {
@@ -699,58 +749,61 @@ module.exports = function (RED) {
         };
 
         if (node.rfxtrxPort) {
-            node.rfxtrx = rfxcomPool.get(node.rfxtrxPort.port, {debug: true});
-            node.on("close", function () {
-                releasePort(node);
-            });
-            node.on("input", function (msg) {
-                // Get the device address from the node topic, or the message topic if the node topic is undefined;
-                // parse the device command from the message payload; and send the appropriate command to the address
-                var path, protocolName, subtype, deviceAddress, unitAddress, levelRange;
-                if (node.topicSource == "node" && node.topic !== undefined) {
-                    path = node.topic;
-                } else if (msg.topic !== undefined) {
-                    path = msg.topic;
-                } else {
-                    node.warn("rfx-lights-out: missing topic");
-                    return;
-                }
-                // Split the path to get the components of the address (remove empty components)
-                path = path.split('/').filter(function (str) {
-                    return str !== "";
+            node.rfxtrx = rfxcomPool.get(node, node.rfxtrxPort.port, {debug: true});
+            if (node.rfxtrx !== null) {
+                node.status({fill:"red",shape:"ring",text:"disconnected"})
+                node.on("close", function () {
+                    releasePort(node);
                 });
-                protocolName = path[0].trim().replace(/ +/g, '_').toUpperCase();
-                deviceAddress = path.slice(1, -1);
-                unitAddress = parseUnitAddress(path.slice(-1)[0]);
-                // The subtype is needed because subtypes within the same protocol might have different dim level ranges
-                //noinspection JSUnusedAssignment
-                try {
-                    subtype = getRfxcomSubtype(node.rfxtrx, protocolName);
-                    switch (node.rfxtrx.transmitters[protocolName].type) {
-                        case txTypeNumber.LIGHTING1 :
-                        case txTypeNumber.LIGHTING6 :
-                            levelRange = [];
-                            break;
-
-                        case txTypeNumber.LIGHTING2 :
-                            levelRange = [0, 15];
-                            break;
-
-                        case txTypeNumber.LIGHTING3 :
-                            levelRange = [0, 10];
-                            break;
-
-                        case txTypeNumber.LIGHTING5 :
-                            levelRange = [0, 31];
-                            break;
+                node.on("input", function (msg) {
+                    // Get the device address from the node topic, or the message topic if the node topic is undefined;
+                    // parse the device command from the message payload; and send the appropriate command to the address
+                    var path, protocolName, subtype, deviceAddress, unitAddress, levelRange;
+                    if (node.topicSource == "node" && node.topic !== undefined) {
+                        path = node.topic;
+                    } else if (msg.topic !== undefined) {
+                        path = msg.topic;
+                    } else {
+                        node.warn("rfx-lights-out: missing topic");
+                        return;
                     }
-                    if (levelRange !== undefined) {
-                        parseCommand(protocolName, deviceAddress.concat(unitAddress), msg.payload, levelRange);
+                    // Split the path to get the components of the address (remove empty components)
+                    path = path.split('/').filter(function (str) {
+                        return str !== "";
+                    });
+                    protocolName = path[0].trim().replace(/ +/g, '_').toUpperCase();
+                    deviceAddress = path.slice(1, -1);
+                    unitAddress = parseUnitAddress(path.slice(-1)[0]);
+                    // The subtype is needed because subtypes within the same protocol might have different dim level ranges
+                    //noinspection JSUnusedAssignment
+                    try {
+                        subtype = getRfxcomSubtype(node.rfxtrx, protocolName);
+                        switch (node.rfxtrx.transmitters[protocolName].type) {
+                            case txTypeNumber.LIGHTING1 :
+                            case txTypeNumber.LIGHTING6 :
+                                levelRange = [];
+                                break;
+
+                            case txTypeNumber.LIGHTING2 :
+                                levelRange = [0, 15];
+                                break;
+
+                            case txTypeNumber.LIGHTING3 :
+                                levelRange = [0, 10];
+                                break;
+
+                            case txTypeNumber.LIGHTING5 :
+                                levelRange = [0, 31];
+                                break;
+                        }
+                        if (levelRange !== undefined) {
+                            parseCommand(protocolName, deviceAddress.concat(unitAddress), msg.payload, levelRange);
+                        }
+                    } catch (exception) {
+                        node.warn((node.name || "rfx-lights-out ") + ": serial port " + node.rfxtrxPort.port + " does not exist");
                     }
-                } catch (exception) {
-                    node.warn((node.name || "rfx-lights-out ") + ": serial port " + node.rfxtrxPort.port + " does not exist");
-                }
-            });
+                });
+            }
         } else {
             node.error("missing config: rfxtrx-port");
         }
