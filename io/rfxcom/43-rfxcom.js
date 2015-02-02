@@ -32,26 +32,14 @@ module.exports = function (RED) {
         var pool = {}, intervalTimer = null;
 
         var connectTo = function (rfxtrx, node) {
-            try {
-                //noinspection JSUnusedLocalSymbols
-                rfxtrx.initialising = true;
-                rfxtrx.initialise(function (error, response, sequenceNumber) {
-                    node.log("connected: Serial port " + rfxtrx.device);
-                    if (intervalTimer !== null) {
-                        clearInterval(intervalTimer);
-                        intervalTimer = null;
-                    }
-                    rfxtrx.connected = true;
-                });
-            }
-            catch (exception) {
-                if (intervalTimer === null) {
-                    node.log("disconnected: " + exception.message);
-                    intervalTimer = setInterval(function () {
-                        connectTo(rfxtrx, node)
-                    }, rfxtrx.initialiseWaitTime);
+            //noinspection JSUnusedLocalSymbols
+            rfxtrx.initialise(function (error, response, sequenceNumber) {
+                node.log("connected: Serial port " + rfxtrx.device);
+                if (intervalTimer !== null) {
+                    clearInterval(intervalTimer);
+                    intervalTimer = null;
                 }
-            }
+            });
         };
 
         return {
@@ -62,14 +50,25 @@ module.exports = function (RED) {
                 var rfxtrx;
                 if (!pool[port]) {
                     rfxtrx = new rfxcom.RfxCom(port, options || {});
-                    rfxtrx.connected = false;
-                    rfxtrx.initialising = false;
                     rfxtrx.transmitters = {};
+                    rfxtrx.on("connecting", function () {
+                        node.log("connecting to " + port);
+                        pool[port].references.forEach(function (node) {
+                            node.status({fill:"yellow",shape:"dot",text:"connecting..."});
+                        });
+                    });
+                    rfxtrx.on("connectfailed", function (msg) {
+                        if (intervalTimer === null) {
+                            node.log("connect failed: " + msg);
+                            intervalTimer = setInterval(function () {
+                                connectTo(rfxtrx, node)
+                            }, rfxtrx.initialiseWaitTime);
+                        }
+                    });
                     rfxtrx.on("status", function (status) {
                         rfxtrx.receiverType = status.receiverType;
                         rfxtrx.firmwareVersion = status.firmwareVersion;
                         rfxtrx.enabledProtocols = status.enabledProtocols;
-                        rfxtrx.initialising = false;
                         pool[port].references.forEach(function (node) {
                             node.status({
                                 fill:  "green",
@@ -78,18 +77,16 @@ module.exports = function (RED) {
                             });
                         });
                     });
-                    rfxtrx.on("connecting", function () {
-                        pool[port].references.forEach(function (node) {
-                            node.status({fill:"yellow",shape:"dot",text:"connecting..."});
-                        });
-                    });
                     rfxtrx.on("disconnect", function (msg) {
-                        rfxtrx.connected = false;
-                        rfxtrx.initialising = false;
+                        node.log("disconnected: " + msg);
                         pool[port].references.forEach(function (node) {
                             node.status({fill:"red",shape:"ring",text:"disconnected"});
                         });
-                        connectTo(rfxtrx, node);
+                        if (intervalTimer === null) {
+                            intervalTimer = setInterval(function () {
+                                connectTo(rfxtrx, node)
+                            }, rfxtrx.initialiseWaitTime);
+                        }
                     });
                     pool[port] = {rfxtrx: rfxtrx, references: []};
                 } else {
@@ -108,9 +105,9 @@ module.exports = function (RED) {
                     pool[port].references.splice(pool[port].references.indexOf(node), 1);
                     if (pool[port].references.length <= 0) {
                         pool[port].rfxtrx.close();
-                        pool[port].rfxtrx.removeAllListeners("status");
-                        pool[port].rfxtrx.removeAllListeners("disconnect");
-                        pool[port] = false;
+                        pool[port].rfxtrx.removeAllListeners();
+                        delete pool[port].rfxtrx;
+                        delete pool[port];
                     }
                 }
             }
@@ -253,13 +250,13 @@ module.exports = function (RED) {
         if (node.rfxtrxPort) {
             node.rfxtrx = rfxcomPool.get(node, node.rfxtrxPort.port, {debug: true});
             if (node.rfxtrx !== null) {
-                node.status({fill:"red",shape:"ring",text:"disconnected"})
+                node.status({fill:"red",shape:"ring",text:"disconnected"});
                 node.on("close", function () {
                     releasePort(node);
                 });
                 node.rfxtrx.on("lighting1", function (evt) {
                     var msg = {};
-                    msg.topic = evt.subtype + "/" + evt.housecode;
+                    msg.topic = rfxcom.lighting1[evt.subtype] + "/" + evt.housecode;
                     if (evt.commandNumber === 5 || evt.commandNumber === 6) {
                         msg.topic = msg.topic + "/+";
                     } else {
@@ -298,7 +295,7 @@ module.exports = function (RED) {
 
                 node.rfxtrx.on("lighting2", function (evt) {
                     var msg = {};
-                    msg.topic = evt.subtype + "/" + evt.id;
+                    msg.topic = rfxcom.lighting2[evt.subtype] + "/" + evt.id;
                     if (evt.commandNumber > 2) {
                         msg.topic = msg.topic + "/+";
                     } else {
@@ -331,7 +328,7 @@ module.exports = function (RED) {
 
                 node.rfxtrx.on("lighting5", function (evt) {
                     var msg = {};
-                    msg.topic = evt.subtype + "/" + evt.id;
+                    msg.topic = rfxcom.lighting5[evt.subtype] + "/" + evt.id;
                     if ((evt.commandNumber == 2 && (evt.subtype == 0 || evt.subtype == 2 || evt.subtype == 4) ) ||
                         (evt.commandNumber == 3) && (evt.subtype == 2 || evt.subtype == 4)) {
                         msg.topic = msg.topic + "/+";
@@ -422,7 +419,7 @@ module.exports = function (RED) {
 
                 node.rfxtrx.on("lighting6", function (evt) {
                     var msg = {};
-                    msg.topic = evt.subtype + "/" + evt.id + "/" + evt.groupcode;
+                    msg.topic = rfxcom.lighting6[evt.subtype] + "/" + evt.id + "/" + evt.groupcode;
                     if (evt.commandNumber > 1) {
                         msg.topic = msg.topic + "/+";
                     } else {
@@ -477,9 +474,7 @@ module.exports = function (RED) {
         var node = this;
         var i;
 
-        var weatherEventHandler = function (evt) {
-            var msg = {};
-            msg.topic = evt.subtype + "/" + evt.id;
+        var sendWeatherMessage = function (evt, msg) {
             if (node.topicSource === "all" || checkTopic(msg.topic, node.topic)) {
                 msg.payload = {status: {rssi: evt.rssi}};
                 if (evt.hasOwnProperty("temperature")) {
@@ -531,33 +526,49 @@ module.exports = function (RED) {
         if (node.rfxtrxPort) {
             node.rfxtrx = rfxcomPool.get(node, node.rfxtrxPort.port, {debug: true});
             if (node.rfxtrx !== null) {
-                node.status({fill:"red",shape:"ring",text:"disconnected"})
+                node.status({fill:"red",shape:"ring",text:"disconnected"});
                 node.on("close", function () {
                     releasePort(node);
                 });
                 for (i = 1; i < rfxcom.temperatureRain1.length; i++) {
-                    node.rfxtrx.on("temprain" + i, weatherEventHandler);
+                    node.rfxtrx.on("temprain" + i, function(evt) {
+                        sendWeatherMessage(evt, {topic:rfxcom.temperatureRain1[evt.subtype] + "/" + evt.id})
+                    });
                 }
                 for (i = 1; i < rfxcom.temperature1.length; i++) {
-                    node.rfxtrx.on("temp" + i, weatherEventHandler);
+                    node.rfxtrx.on("temp" + i, function(evt) {
+                        sendWeatherMessage(evt, {topic:rfxcom.temperature1[evt.subtype] + "/" + evt.id})
+                    });
                 }
                 for (i = 1; i < rfxcom.humidity1.length; i++) {
-                    node.rfxtrx.on("humidity" + i, weatherEventHandler);
+                    node.rfxtrx.on("humidity" + i, function(evt) {
+                        sendWeatherMessage(evt, {topic:rfxcom.humidity1[evt.subtype] + "/" + evt.id})
+                    });
                 }
                 for (i = 1; i < rfxcom.temperatureHumidity1.length; i++) {
-                    node.rfxtrx.on("th" + i, weatherEventHandler);
+                    node.rfxtrx.on("th" + i, function(evt) {
+                        sendWeatherMessage(evt, {topic:rfxcom.temperatureHumidity1[evt.subtype] + "/" + evt.id})
+                    });
                 }
                 for (i = 1; i < rfxcom.tempHumBaro1.length; i++) {
-                    node.rfxtrx.on("thb" + i, weatherEventHandler);
+                    node.rfxtrx.on("thb" + i, function(evt) {
+                        sendWeatherMessage(evt, {topic:rfxcom.tempHumBaro1[evt.subtype] + "/" + evt.id})
+                    });
                 }
                 for (i = 1; i < rfxcom.temperatureRain1.length; i++) {
-                    node.rfxtrx.on("rain" + i, weatherEventHandler);
+                    node.rfxtrx.on("rain" + i, function(evt) {
+                        sendWeatherMessage(evt, {topic:rfxcom.temperatureRain1[evt.subtype] + "/" + evt.id})
+                    });
                 }
                 for (i = 1; i < rfxcom.wind1.length; i++) {
-                    node.rfxtrx.on("wind" + i, weatherEventHandler);
+                    node.rfxtrx.on("wind" + i, function(evt) {
+                        sendWeatherMessage(evt, {topic:rfxcom.wind1[evt.subtype] + "/" + evt.id})
+                    });
                 }
                 for (i = 1; i < rfxcom.uv1.length; i++) {
-                    node.rfxtrx.on("uv" + i, weatherEventHandler);
+                    node.rfxtrx.on("uv" + i, function(evt) {
+                        sendWeatherMessage(evt, {topic:rfxcom.uv1[evt.subtype] + "/" + evt.id})
+                    });
                 }
             }
         } else {
@@ -608,10 +619,9 @@ module.exports = function (RED) {
         this.rfxtrxPort = RED.nodes.getNode(this.port);
 
         var node = this;
+        var i;
 
-        var meterEventHandler = function (evt) {
-            var msg = {};
-            msg.topic = evt.subtype + "/" + evt.id;
+        var sendMeterMessage = function (evt, msg) {
             if (node.topicSource === "all" || checkTopic(msg.topic, node.topic)) {
                 msg.payload = {status: {rssi: evt.rssi}};
                 if (evt.hasOwnProperty("voltage")) {
@@ -642,11 +652,30 @@ module.exports = function (RED) {
         if (node.rfxtrxPort) {
             node.rfxtrx = rfxcomPool.get(node, node.rfxtrxPort.port, {debug: true});
             if (node.rfxtrx !== null) {
-                node.status({fill:"red",shape:"ring",text:"disconnected"})
+                node.status({fill:"red",shape:"ring",text:"disconnected"});
                 node.on("close", function () {
                     releasePort(node);
                 });
-                node.rfxtrx.on("elec", meterEventHandler)
+                for (i = 1; i < rfxcom.elec1.length; i++) {
+                    node.rfxtrx.on("elec" + i, function (evt) {
+                        sendMeterMessage(evt, {topic: rfxcom.elec1[evt.subtype] + "/" + evt.id})
+                    })
+                }
+                for (i = 1; i < rfxcom.elec23.length; i++) {
+                    node.rfxtrx.on("elec" + i + 1, function (evt) {
+                        sendMeterMessage(evt, {topic: rfxcom.elec23[evt.subtype] + "/" + evt.id})
+                    })
+                }
+                for (i = 1; i < rfxcom.elec1.length; i++) {
+                    node.rfxtrx.on("elec" + i + 3, function (evt) {
+                        sendMeterMessage(evt, {topic: rfxcom.elec4[evt.subtype] + "/" + evt.id})
+                    })
+                }
+                for (i = 1; i < rfxcom.elec1.length; i++) {
+                    node.rfxtrx.on("elec" + i + 4, function (evt) {
+                        sendMeterMessage(evt, {topic: rfxcom.elec5[evt.subtype] + "/" + evt.id})
+                    })
+                }
             }
         } else {
             node.error("missing config: rfxtrx-port");
@@ -751,7 +780,7 @@ module.exports = function (RED) {
         if (node.rfxtrxPort) {
             node.rfxtrx = rfxcomPool.get(node, node.rfxtrxPort.port, {debug: true});
             if (node.rfxtrx !== null) {
-                node.status({fill:"red",shape:"ring",text:"disconnected"})
+                node.status({fill:"red",shape:"ring",text:"disconnected"});
                 node.on("close", function () {
                     releasePort(node);
                 });
@@ -811,4 +840,4 @@ module.exports = function (RED) {
 
     RED.nodes.registerType("rfx-lights-out", RfxLightsOutNode);
 
-}
+};
